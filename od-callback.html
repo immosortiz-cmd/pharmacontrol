@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Conectando con OneDrive...</title>
+  <style>
+    body{font-family:sans-serif;background:#0e1117;color:#e2e8f4;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;flex-direction:column;gap:12px}
+    .spinner{width:36px;height:36px;border:3px solid #2a3448;border-top-color:#3b82f6;border-radius:50%;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    p{font-size:14px;color:#8b9ab8}
+  </style>
+</head>
+<body>
+  <div class="spinner"></div>
+  <p>Conectando con OneDrive...</p>
+  <script>
+    const hash = window.location.hash;
+    if(hash && hash.includes('access_token')) {
+      const params = new URLSearchParams(hash.slice(1));
+      const token  = params.get('access_token');
+      if(token) {
+        localStorage.setItem('pharma_od_token', token);
+        localStorage.setItem('pharma_od_just_connected', '1');
+        window.location.href = window.location.pathname.replace('od-callback.html','').replace('od-callback.html','') + 'index.html';
+      } else {
+        document.querySelector('p').textContent = 'Error: token no recibido. Cierra esta ventana.';
+      }
+    } else {
+      window.location.href = './index.html';
+    }
+  </script>
+</body>
+</html>
