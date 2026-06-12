@@ -605,13 +605,13 @@ $('btn-enviar-ahora').addEventListener('click',()=>{toast('El envío de correos 
 const OD_LS_TOKEN='pharma_od_token', OD_LS_CLIENT='pharma_od_clientid', OD_LS_SYNCED='pharma_od_just_connected', OD_LS_LAST='pharma_od_last_sync';
 let odToken=localStorage.getItem(OD_LS_TOKEN)||null;
 
-function odGetRedirectUri(){return window.location.origin+window.location.pathname.replace(/\/[^\/]*$/,'/')+'od-callback.html';}
+function odGetRedirectUri(){const p=window.location.pathname.endsWith('/')?window.location.pathname:window.location.pathname.substring(0,window.location.pathname.lastIndexOf('/')+1);return window.location.origin+p+'od-callback.html';}
 function odSaveClientId(v){localStorage.setItem(OD_LS_CLIENT,v.trim());}
 function odConnect(){
   const clientId=$('od-client-id')?.value.trim()||localStorage.getItem(OD_LS_CLIENT);
   if(!clientId){toast('Configura el Client ID primero','error');return;}
   localStorage.setItem(OD_LS_CLIENT,clientId);
-  const redirect=window.location.origin+window.location.pathname.replace(/\/[^\/]*$/,'/')+'od-callback.html';
+  const redirect=odGetRedirectUri();
   window.location.href=`https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=${encodeURIComponent(clientId)}&response_type=token&redirect_uri=${encodeURIComponent(redirect.trim())}&scope=Files.ReadWrite&response_mode=fragment&prompt=select_account`;
 }
 function odDisconnect(){if(!confirm('¿Desconectar OneDrive?'))return;odToken=null;localStorage.removeItem(OD_LS_TOKEN);odUpdateUI(false);toast('Desconectado','info');}
@@ -623,7 +623,7 @@ function odUpdateUI(connected){
   if(connected){dot.style.background='var(--green)';dot.style.boxShadow='0 0 6px var(--green)';msg.textContent='Conectado a OneDrive';sub.textContent='Datos en OneDrive/Apps/PharmaControl/data.json';if(btnCon)btnCon.style.display='none';if(btnDis)btnDis.style.display='';if(btnSync)btnSync.style.display='';if(btnLoad)btnLoad.style.display='';const last=localStorage.getItem(OD_LS_LAST);if(last&&lastEl){lastEl.style.display='';lastEl.textContent='Última sincronización: '+new Date(last).toLocaleString('es-MX');}}
   else{dot.style.background='var(--text3)';dot.style.boxShadow='none';msg.textContent='No conectado';sub.textContent='Conecta tu cuenta Microsoft para sincronizar entre dispositivos';if(btnCon)btnCon.style.display='';if(btnDis)btnDis.style.display='none';if(btnSync)btnSync.style.display='none';if(btnLoad)btnLoad.style.display='none';if(lastEl)lastEl.style.display='none';}
 }
-function odInitPanel(){const ci=$('od-client-id');const ru=$('od-redirect-uri');if(ci)ci.value=localStorage.getItem(OD_LS_CLIENT)||'';if(ru)ru.value=window.location.origin+window.location.pathname.replace(/\/[^\/]*$/,'/')+'od-callback.html';odUpdateUI(!!odToken);}
+function odInitPanel(){const ci=$('od-client-id');const ru=$('od-redirect-uri');if(ci)ci.value=localStorage.getItem(OD_LS_CLIENT)||'';if(ru)ru.value=odGetRedirectUri();odUpdateUI(!!odToken);}
 function odCopyRedirect(){const el=$('od-redirect-uri');if(!el)return;navigator.clipboard.writeText(el.value.trim()).then(()=>toast('URI copiada'));}
 async function odSyncToCloud(){
   if(!odToken){toast('Conecta OneDrive primero','error');return;}
