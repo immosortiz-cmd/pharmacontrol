@@ -134,18 +134,35 @@ const tipoBadge   = t => { const m={PLC:'b-blue',VFD:'b-cyan',HMI:'b-gray','PC I
 const tipoCalClass= t => ({Backup:'backup',Mantenimiento:'mant','Auditoría GMP':'audit'})[t]||'otro';
 const credBadge   = v => { if(!v)return `<span class="badge b-gray">Sin venc.</span>`; const d=(new Date(v)-new Date())/86400000; if(d<0)return `<span class="badge b-red"><i class="ti ti-alert-circle"></i>Vencida</span>`; if(d<=30)return `<span class="badge b-amber"><i class="ti ti-clock"></i>${Math.ceil(d)}d</span>`; return `<span class="badge b-green"><i class="ti ti-check"></i>Vigente</span>`; };
 
-// ── SIDEBAR MÓVIL ─────────────────────────────────────────────
-function toggleSidebar(force){
-  const sidebar=document.querySelector('.sidebar');
-  const overlay=document.getElementById('sidebar-overlay');
-  const open=force!==undefined?force:!sidebar.classList.contains('open');
-  sidebar.classList.toggle('open',open);
-  if(overlay) overlay.classList.toggle('active',open);
+
+
+// ── SIDEBAR MÓVIL ────────────────────────────────────────────
+function toggleSidebar(force) {
+  const sidebar  = document.querySelector('.sidebar');
+  const overlay  = document.getElementById('sidebar-overlay');
+  const isOpen   = sidebar.classList.contains('open');
+  const newState = force !== undefined ? force : !isOpen;
+  sidebar.classList.toggle('open', newState);
+  if(overlay) overlay.classList.toggle('active', newState);
 }
-const _ov=document.createElement('div');
-_ov.id='sidebar-overlay'; _ov.className='sidebar-overlay';
-_ov.addEventListener('click',()=>toggleSidebar(false));
-document.body.appendChild(_ov);
+
+// Crear overlay dinámicamente
+const _mobOverlay = document.createElement('div');
+_mobOverlay.id = 'sidebar-overlay';
+_mobOverlay.className = 'sidebar-overlay';
+_mobOverlay.addEventListener('click', () => toggleSidebar(false));
+document.body.appendChild(_mobOverlay);
+
+// Cerrar sidebar al navegar en móvil
+document.addEventListener('click', e => {
+  const navItem = e.target.closest('.nav-item');
+  if(navItem && window.innerWidth <= 768) toggleSidebar(false);
+});
+
+// Cerrar con tecla Escape
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape') toggleSidebar(false);
+});
 
 // ── NAVEGACIÓN ────────────────────────────────────────────────
 let currentView='dashboard';
@@ -218,6 +235,15 @@ let colConfig=loadColConfig();
 
 function loadInventario(){
   allMaquinas=DB.getMaquinas();
+  // En móvil siempre mostrar tarjetas por defecto
+  if(window.innerWidth <= 768 && viewMode === 'table') {
+    viewMode = 'cards';
+    document.querySelectorAll('.vtoggle').forEach(b => b.classList.remove('active'));
+    const cardsBtn = document.querySelector('.vtoggle[data-mode="cards"]');
+    if(cardsBtn) cardsBtn.classList.add('active');
+    const btnCol = $('btn-col-config');
+    if(btnCol) btnCol.style.display = 'none';
+  }
   updateLineaFilter(); renderMaquinas();
 }
 function updateLineaFilter(){
