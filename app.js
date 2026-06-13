@@ -796,7 +796,7 @@ function elecRenderTableros() {
             <td><strong>${esc(c.nombre)}</strong></td>
             <td><span class="badge b-gray" style="font-size:10px">${esc(c.tipo)}</span></td>
             <td style="font-family:var(--mono);font-size:11px">${esc(c.marca||'—')} / ${esc(c.modelo||'—')}</td>
-            <td><span style="color:${c.estado==='vigente'?'var(--green)':c.estado==='obsoleto'?'var(--red)':'var(--text3)';};font-size:11px;font-weight:500">${c.estado==='vigente'?'Vigente':c.estado==='obsoleto'?'Obsoleto':'Sin definir'}</span></td>
+            <td><span style="color:${c.estado==='vigente'?'var(--green)':c.estado==='obsoleto'?'var(--red)':'var(--text3)'};font-size:11px;font-weight:500">${c.estado==='vigente'?'Vigente':c.estado==='obsoleto'?'Obsoleto':'Sin definir'}</span></td>
             <td style="font-family:var(--mono);text-align:center">${c.cantidad||1}</td>
             <td><button class="btn btn-sm btn-danger" onclick="elecDeleteComp('${c.id}','${esc(c.nombre)}')"><i class="ti ti-trash"></i></button></td>
           </tr>`).join('')}</tbody>
