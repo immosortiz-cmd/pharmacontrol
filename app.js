@@ -25,7 +25,7 @@ function loadDB() {
   try { return JSON.parse(localStorage.getItem(DB_KEY)) || JSON.parse(JSON.stringify(defaultDB)); }
   catch(e) { return JSON.parse(JSON.stringify(defaultDB)); }
 }
-function saveDB() { localStorage.setItem(DB_KEY, JSON.stringify(db)); }
+function saveDB() { localStorage.setItem(DB_KEY, JSON.stringify(db)); if(typeof odMarkPending==='function') odMarkPending(); }
 function loadCFG() {
   try {
     const s = JSON.parse(localStorage.getItem(CFG_KEY));
@@ -684,6 +684,8 @@ function odCheckCallback(){const s=localStorage.getItem(OD_LS_TOKEN);if(s){odTok
 function odUpdateUI(connected){
   const dot=$('od-status-dot'),msg=$('od-status-msg'),sub=$('od-status-sub');
   const btnCon=$('btn-od-connect'),btnDis=$('btn-od-disconnect'),lastEl=$('od-last-sync');
+  // Actualizar también el sidebar
+  setTimeout(odSidebarUpdateUI, 50);
   if(!dot)return;
   if(connected){dot.style.background='var(--green)';dot.style.boxShadow='0 0 6px var(--green)';msg.textContent='Conectado a OneDrive';sub.textContent='Datos en OneDrive/Apps/PharmaControl/data.json';if(btnCon)btnCon.style.display='none';if(btnDis)btnDis.style.display='';const last=localStorage.getItem(OD_LS_LAST);if(last&&lastEl){lastEl.style.display='';lastEl.textContent='Última sincronización: '+new Date(last).toLocaleString('es-MX');}}
   else{dot.style.background='var(--text3)';dot.style.boxShadow='none';msg.textContent='No conectado';sub.textContent='Conecta tu cuenta Microsoft para sincronizar entre dispositivos';if(btnCon)btnCon.style.display='';if(btnDis)btnDis.style.display='none';if(lastEl)lastEl.style.display='none';}
@@ -693,7 +695,8 @@ function odCopyRedirect(){const el=$('od-redirect-uri');if(!el)return;navigator.
 async function odSyncToCloud(){
   if(!odToken){toast('Conecta OneDrive primero','error');return;}
   toast('Sincronizando...','info');
-  const payload={maquinas:db.maquinas,backups:db.backups,tareas:db.tareas,usuarios:db.usuarios,credenciales:db.credenciales,auditLog:db.auditLog||[],_syncedAt:new Date().toISOString()};
+  const elecData=loadElec();
+  const payload={maquinas:db.maquinas,backups:db.backups,tareas:db.tareas,usuarios:db.usuarios,credenciales:db.credenciales,auditLog:db.auditLog||[],tableros:elecData.tableros||[],componentes:elecData.componentes||[],_syncedAt:new Date().toISOString()};
   let r;
   try{
     r=await fetch('https://graph.microsoft.com/v1.0/me/drive/root:/Apps/PharmaControl/data.json:/content',{method:'PUT',headers:{'Authorization':'Bearer '+odToken,'Content-Type':'application/json'},body:JSON.stringify(payload)});
@@ -721,10 +724,17 @@ async function odLoadFromCloud(){
     const data=await r.json();
     db={...defaultDB,...data};
     saveDB();
+    // Restaurar datos eléctricos
+    if(data.tableros||data.componentes){
+      saveElec({tableros:data.tableros||[],componentes:data.componentes||[]});
+    }
     localStorage.setItem(OD_LS_LAST,new Date().toISOString());
     try{odUpdateUI(true);}catch(e){}
     toast('✓ Datos cargados desde OneDrive');
     loadDashboard();
+    // Refrescar módulo eléctrico si está activo
+    if(currentView==='elec-tableros') elecRenderTableros();
+    if(currentView==='elec-componentes') elecRenderComps();
   } else if(r.status===404){
     toast('Sin datos en OneDrive todavía — sube primero desde este dispositivo','info');
   } else if(r.status===401){
@@ -737,6 +747,78 @@ async function odLoadFromCloud(){
 }
 
 
+
+// ── ONEDRIVE SIDEBAR SYNC BAR ─────────────────────────────────
+let _odPendingSync = false; // true cuando hay cambios sin sincronizar
+
+function odSidebarUpdateUI() {
+  const icon   = document.getElementById('od-sync-icon');
+  const dot    = document.getElementById('od-sync-dot');
+  const status = document.getElementById('od-sync-status');
+  const badge  = document.getElementById('od-sync-badge');
+  const btnLoad = document.getElementById('sidebar-btn-load');
+  const btnSave = document.getElementById('sidebar-btn-save');
+  if(!icon) return;
+
+  if(!odToken) {
+    // Sin conectar
+    icon.style.color = 'var(--text3)';
+    if(dot) { dot.className='od-sync-dot'; }
+    if(status) status.textContent = 'Sin conectar';
+    if(badge) badge.style.display='none';
+    if(btnLoad) btnLoad.disabled = true;
+    if(btnSave) btnSave.disabled = true;
+  } else if(_odPendingSync) {
+    // Conectado con cambios pendientes
+    icon.style.color = 'var(--amber)';
+    if(dot) { dot.className='od-sync-dot pending'; }
+    if(status) status.textContent = 'Cambios pendientes';
+    if(badge) { badge.style.background='var(--amber)'; badge.style.display='block'; }
+    if(btnLoad) btnLoad.disabled = false;
+    if(btnSave) btnSave.disabled = false;
+  } else {
+    // Sincronizado
+    icon.style.color = 'var(--green)';
+    if(dot) { dot.className='od-sync-dot connected'; }
+    const last = localStorage.getItem(OD_LS_LAST);
+    if(status) status.textContent = last
+      ? 'Sincronizado ' + new Date(last).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})
+      : 'Conectado';
+    if(badge) badge.style.display='none';
+    if(btnLoad) btnLoad.disabled = false;
+    if(btnSave) btnSave.disabled = false;
+  }
+}
+
+// Marcar como pendiente — se llama desde saveDB y saveElec originales
+function odMarkPending() {
+  _odPendingSync = true;
+  odSidebarUpdateUI();
+}
+
+// Botones del sidebar
+async function odSidebarSave() {
+  const icon = document.getElementById('od-sync-icon');
+  if(icon) icon.classList.add('od-spinning');
+  const btnSave = document.getElementById('sidebar-btn-save');
+  if(btnSave) btnSave.disabled = true;
+  await odSyncToCloud();
+  _odPendingSync = false;
+  if(icon) icon.classList.remove('od-spinning');
+  odSidebarUpdateUI();
+}
+
+async function odSidebarLoad() {
+  const icon = document.getElementById('od-sync-icon');
+  if(icon) icon.classList.add('od-spinning');
+  const btnLoad = document.getElementById('sidebar-btn-load');
+  if(btnLoad) btnLoad.disabled = true;
+  await odLoadFromCloud();
+  _odPendingSync = false;
+  if(icon) icon.classList.remove('od-spinning');
+  odSidebarUpdateUI();
+}
+
 // ══════════════════════════════════════════════════════════════
 // MÓDULO ELÉCTRICO — Tableros y Componentes
 // ══════════════════════════════════════════════════════════════
@@ -747,9 +829,18 @@ function loadElec() {
   try { return JSON.parse(localStorage.getItem(ELEC_KEY)) || {tableros:[], componentes:[]}; }
   catch(e) { return {tableros:[], componentes:[]}; }
 }
-function saveElec(e) { localStorage.setItem(ELEC_KEY, JSON.stringify(e)); }
+function saveElec(e) { localStorage.setItem(ELEC_KEY, JSON.stringify(e)); if(typeof odMarkPending==='function') odMarkPending(); }
 
 // ── TABLEROS ──────────────────────────────────────────────────
+function diagElec() {
+  const elec = localStorage.getItem('pharmacontrol_elec');
+  const parsed = elec ? JSON.parse(elec) : null;
+  const msg = parsed
+    ? `Tableros: ${parsed.tableros?.length||0}\nComponentes: ${parsed.componentes?.length||0}\n\nDatos: ${elec.slice(0,200)}...`
+    : 'pharmacontrol_elec = null (sin datos)';
+  alert('DIAGNÓSTICO ELÉCTRICO:\n\n' + msg);
+}
+
 function elecRenderTableros() {
   const e = loadElec();
   const s = ($('elec-t-search')?.value||'').toLowerCase();
@@ -796,12 +887,14 @@ function elecRenderTableros() {
             <td><strong>${esc(c.nombre)}</strong></td>
             <td><span class="badge b-gray" style="font-size:10px">${esc(c.tipo)}</span></td>
             <td style="font-family:var(--mono);font-size:11px">${esc(c.marca||'—')} / ${esc(c.modelo||'—')}</td>
-            <td><span style="color:${c.estado==='vigente'?'var(--green)':c.estado==='obsoleto'?'var(--red)':'var(--text3)';};font-size:11px;font-weight:500">${c.estado==='vigente'?'Vigente':c.estado==='obsoleto'?'Obsoleto':'Sin definir'}</span></td>
+            <td><span style="color:${c.estado==='vigente'?'var(--green)':c.estado==='obsoleto'?'var(--red)':'var(--text3)'};font-size:11px;font-weight:500">${c.estado==='vigente'?'Vigente':c.estado==='obsoleto'?'Obsoleto':'Sin definir'}</span></td>
             <td style="font-family:var(--mono);text-align:center">${c.cantidad||1}</td>
             <td><button class="btn btn-sm btn-danger" onclick="elecDeleteComp('${c.id}','${esc(c.nombre)}')"><i class="ti ti-trash"></i></button></td>
           </tr>`).join('')}</tbody>
         </table>` : '<p style="font-size:12px;color:var(--text3)">Sin componentes registrados en este tablero.</p>'}
-        <button class="btn btn-sm btn-secondary" style="margin-top:10px" onclick="elecOpenCompModal('${t.id}','${esc(t.nombre)}')">
+        <button class="btn btn-sm btn-secondary" style="margin-top:10px" 
+          data-tid="${t.id}" data-tnombre="${esc(t.nombre)}"
+          onclick="elecOpenCompModal(this.dataset.tid, this.dataset.tnombre)">
           <i class="ti ti-plus"></i>Agregar componente
         </button>
       </div>
@@ -1048,3 +1141,4 @@ $('btn-guardar-apariencia').onclick=()=>{
 odCheckCallback();
 applyApariencia(loadAparienciaData());
 loadDashboard();
+odSidebarUpdateUI();
