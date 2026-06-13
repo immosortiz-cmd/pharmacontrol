@@ -47,7 +47,29 @@
       <a class="nav-item" data-view="onedrive"><i class="ti ti-brand-onedrive"></i>OneDrive Sync</a>
       <a class="nav-item" data-view="apariencia"><i class="ti ti-palette"></i>Apariencia</a>
     </div>
-    <div class="sidebar-footer"><div class="status-dot"></div><span>Sistema activo</span></div>
+          <!-- ONEDRIVE SYNC BAR (estilo FinFlow) -->
+      <div class="od-sync-bar" id="od-sync-bar">
+        <div class="od-sync-header" onclick="loadView('onedrive')" title="Ir a OneDrive Sync">
+          <div class="od-sync-icon-wrap">
+            <i class="ti ti-cloud" id="od-sync-icon" style="font-size:20px;color:var(--text3)"></i>
+            <span class="od-sync-badge" id="od-sync-badge" style="display:none"></span>
+          </div>
+          <div class="od-sync-info">
+            <span class="od-sync-label">ONEDRIVE</span>
+            <span class="od-sync-status" id="od-sync-status">Sin conectar</span>
+          </div>
+          <span class="od-sync-dot" id="od-sync-dot"></span>
+        </div>
+        <div class="od-sync-btns">
+          <button class="od-btn" id="sidebar-btn-load" onclick="odSidebarLoad()" title="Cargar desde OneDrive">
+            <i class="ti ti-cloud-download"></i><span>Cargar</span>
+          </button>
+          <button class="od-btn od-btn-primary" id="sidebar-btn-save" onclick="odSidebarSave()" title="Guardar en OneDrive">
+            <i class="ti ti-cloud-upload"></i><span>Guardar</span>
+          </button>
+        </div>
+      </div>
+      <div class="sidebar-footer"><div class="status-dot"></div><span>Sistema activo</span></div>
 <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" title="Menú"><i class="ti ti-menu-2"></i></button>
   </nav>
 
@@ -446,6 +468,7 @@
         <div class="header-actions">
           <button class="btn btn-secondary" onclick="elecExportExcel()"><i class="ti ti-file-spreadsheet"></i>Exportar Excel</button>
           <button class="btn btn-primary" onclick="elecOpenTableroModal()"><i class="ti ti-plus"></i>Nuevo tablero</button>
+        <button class="btn btn-secondary" onclick="diagElec()"><i class="ti ti-stethoscope"></i>Diagnóstico</button>
         </div>
       </div>
       <div class="stats-grid" id="elec-kpi-grid" style="grid-template-columns:repeat(6,1fr)"></div>
@@ -480,6 +503,7 @@
       <div class="page-header">
         <div><h1 class="page-title">Tableros y subtableros</h1><p class="page-sub">Tableros principales · Subtableros de equipos y maquinaria</p></div>
         <button class="btn btn-primary" onclick="elecOpenTableroModal()"><i class="ti ti-plus"></i>Nuevo tablero</button>
+        <button class="btn btn-secondary" onclick="diagElec()"><i class="ti ti-stethoscope"></i>Diagnóstico</button>
       </div>
       <div class="toolbar">
         <div class="search-box"><i class="ti ti-search"></i><input type="text" id="elec-t-search" placeholder="Buscar tablero..." oninput="elecRenderTableros()"></div>

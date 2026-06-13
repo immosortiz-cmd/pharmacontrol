@@ -482,3 +482,27 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 /* Dispositivo con botón eliminar y fecha */
 .device-row{align-items:flex-start}
 .device-row .device-info{flex:1;min-width:0}
+
+/* ── ONEDRIVE SYNC BAR (sidebar) ─────────────────────────── */
+.od-sync-bar{border-top:1px solid var(--border);padding:12px 14px 8px;display:flex;flex-direction:column;gap:8px}
+.od-sync-header{display:flex;align-items:center;gap:10px;cursor:pointer;border-radius:var(--radius);padding:6px 8px;transition:background .15s}
+.od-sync-header:hover{background:var(--bg3)}
+.od-sync-icon-wrap{position:relative;width:28px;height:28px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.od-sync-badge{position:absolute;top:-3px;right:-3px;width:9px;height:9px;border-radius:50%;border:2px solid var(--bg2)}
+.od-sync-info{display:flex;flex-direction:column;flex:1;min-width:0}
+.od-sync-label{font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--text3);text-transform:uppercase}
+.od-sync-status{font-size:11px;font-weight:500;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.od-sync-dot{width:8px;height:8px;border-radius:50%;background:var(--text3);flex-shrink:0;transition:background .3s,box-shadow .3s}
+.od-sync-dot.connected{background:var(--green);box-shadow:0 0 6px var(--green)}
+.od-sync-dot.pending{background:var(--amber);box-shadow:0 0 6px var(--amber)}
+.od-sync-btns{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.od-btn{display:flex;align-items:center;justify-content:center;gap:5px;padding:7px 10px;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:12px;font-weight:500;cursor:pointer;transition:all .15s;font-family:var(--font)}
+.od-btn:hover{background:var(--bg4);color:var(--text)}
+.od-btn i{font-size:14px}
+.od-btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.od-btn-primary:hover{opacity:.88}
+.od-btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* Icono rotando al sincronizar */
+@keyframes od-spin{to{transform:rotate(360deg)}}
+.od-spinning{animation:od-spin .8s linear infinite}
