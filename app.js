@@ -46,7 +46,7 @@ const DB = {
   // DISPOSITIVOS
   addDispositivo: (mId,d) => {
     const i=db.maquinas.findIndex(m=>m.id===mId); if(i<0)return null;
-    const n={id:uid(),backupEstado:'Sin backup',ultimoBackup:null,version:'',...d};
+    const n={id:uid(),creadoEn:new Date().toISOString(),backupEstado:'Sin backup',ultimoBackup:null,version:'',...d};
     db.maquinas[i].dispositivos.push(n); saveDB(); return n;
   },
   updateDispositivo: (mId,dId,d) => {
@@ -310,7 +310,18 @@ function renderMachineCard(m){
       ${m.fabricante?`<span><i class="ti ti-building-factory"></i>${esc(m.fabricante)}</span>`:''}
       ${m.serie?`<span><i class="ti ti-tag"></i>${esc(m.serie)}</span>`:''}
     </div>
-    <div class="devices-list">${devs.length?devs.map(d=>`<div class="device-row"><i class="ti ${di[d.tipo]||'ti-cpu'}"></i><div class="device-info"><span class="device-tipo">${esc(d.tipo)}</span><span class="device-modelo">${esc(d.modelo)}${d.marca?' · '+esc(d.marca):''}</span></div>${backupBadge(d.backupEstado)}</div>`).join(''):'<div style="font-size:12px;color:var(--text3);padding:6px">Sin dispositivos</div>'}</div>
+    <div class="devices-list">${devs.length?devs.map(d=>`<div class="device-row">
+        <i class="ti ${di[d.tipo]||'ti-cpu'}"></i>
+        <div class="device-info">
+          <span class="device-tipo">${esc(d.tipo)}</span>
+          <span class="device-modelo">${esc(d.modelo)}${d.marca?' · '+esc(d.marca):''}</span>
+          ${d.creadoEn?`<span style="font-size:10px;color:var(--text3);font-family:var(--mono);display:block;margin-top:2px"><i class="ti ti-calendar" style="font-size:10px"></i> Registrado: ${fmtDate(d.creadoEn)}</span>`:''}
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+          ${backupBadge(d.backupEstado)}
+          <button class="btn btn-sm btn-danger" onclick="deleteDispositivo('${m.id}','${d.id}','${esc(d.modelo)}')" title="Eliminar dispositivo" style="padding:2px 6px;font-size:10px"><i class="ti ti-trash"></i></button>
+        </div>
+      </div>`).join(''):'<div style="font-size:12px;color:var(--text3);padding:6px">Sin dispositivos</div>'}</div>
     <div class="mc-actions"><button class="btn btn-sm" onclick="editMaquina('${m.id}')"><i class="ti ti-edit"></i>Editar</button><button class="btn btn-sm" onclick="addDispositivo('${m.id}')"><i class="ti ti-plus"></i>Dispositivo</button><button class="btn btn-sm btn-danger" onclick="deleteMaquina('${m.id}','${esc(m.nombre)}')" style="margin-left:auto"><i class="ti ti-trash"></i></button></div>
   </div>`;
 }
@@ -354,6 +365,13 @@ function deleteMaquina(id,nombre){if(!confirm(`¿Eliminar "${nombre}" y todos su
 // ── DISPOSITIVO CRUD ──────────────────────────────────────────
 function dispositivoForm(d={}){return `<div class="form-row"><div class="form-group"><label class="form-label">Tipo <span class="req">*</span></label><select class="form-select" id="dv-tipo"><option ${d.tipo==='PLC'?'selected':''}>PLC</option><option ${d.tipo==='VFD'?'selected':''}>VFD</option><option ${d.tipo==='HMI'?'selected':''}>HMI</option><option ${d.tipo==='PC Industrial'?'selected':''}>PC Industrial</option><option ${d.tipo==='Otro'?'selected':''}>Otro</option></select></div><div class="form-group"><label class="form-label">Modelo <span class="req">*</span></label><input class="form-input" id="dv-modelo" value="${esc(d.modelo||'')}"></div></div><div class="form-row"><div class="form-group"><label class="form-label">Marca</label><input class="form-input" id="dv-marca" value="${esc(d.marca||'')}"></div><div class="form-group"><label class="form-label">Función</label><input class="form-input" id="dv-fun" value="${esc(d.funcion||'')}"></div></div><div class="form-row"><div class="form-group"><label class="form-label">N° serie</label><input class="form-input" id="dv-serie" value="${esc(d.serie||'')}"></div><div class="form-group"><label class="form-label">IP / Slot</label><input class="form-input" id="dv-ip" value="${esc(d.ip||'')}"></div></div><div class="form-group"><label class="form-label">Notas</label><textarea class="form-textarea" id="dv-notas">${esc(d.notas||'')}</textarea></div>`;}
 function collectDisp(){return{tipo:fv('dv-tipo'),modelo:fv('dv-modelo'),marca:fv('dv-marca'),funcion:fv('dv-fun'),serie:fv('dv-serie'),ip:fv('dv-ip'),notas:fv('dv-notas')};}
+function deleteDispositivo(mId, dId, modelo) {
+  if(!confirm(`¿Eliminar el dispositivo "${modelo}"? Se perderá su historial de backup.`)) return;
+  DB.deleteDispositivo(mId, dId);
+  toast(`Dispositivo "${modelo}" eliminado`, 'info');
+  loadInventario();
+}
+
 function addDispositivo(mId){const m=DB.getMaquinas().find(x=>x.id===mId);if(!m)return;openModal(`Dispositivo — ${m.nombre}`,dispositivoForm(),()=>{const b=collectDisp();if(!b.tipo||!b.modelo){toast('Tipo y modelo obligatorios','error');return;}DB.addDispositivo(mId,b);closeModal();toast('Dispositivo agregado');loadInventario();});}
 
 // ── IMPORTAR EXCEL ────────────────────────────────────────────

@@ -478,3 +478,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
   .sidebar{padding-bottom:env(safe-area-inset-bottom)}
   .sidebar-toggle{top:max(12px,env(safe-area-inset-top))}
 }
+
+/* Dispositivo con botón eliminar y fecha */
+.device-row{align-items:flex-start}
+.device-row .device-info{flex:1;min-width:0}
