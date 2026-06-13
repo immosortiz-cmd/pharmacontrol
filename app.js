@@ -730,6 +730,9 @@ async function odLoadFromCloud(){
     try{odUpdateUI(true);}catch(e){}
     toast('✓ Datos cargados desde OneDrive');
     loadDashboard();
+    // Refrescar módulo eléctrico si está activo
+    if(currentView==='elec-tableros') elecRenderTableros();
+    if(currentView==='elec-componentes') elecRenderComps();
   } else if(r.status===404){
     toast('Sin datos en OneDrive todavía — sube primero desde este dispositivo','info');
   } else if(r.status===401){
