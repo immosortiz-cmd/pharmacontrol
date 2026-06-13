@@ -693,7 +693,8 @@ function odCopyRedirect(){const el=$('od-redirect-uri');if(!el)return;navigator.
 async function odSyncToCloud(){
   if(!odToken){toast('Conecta OneDrive primero','error');return;}
   toast('Sincronizando...','info');
-  const payload={maquinas:db.maquinas,backups:db.backups,tareas:db.tareas,usuarios:db.usuarios,credenciales:db.credenciales,auditLog:db.auditLog||[],_syncedAt:new Date().toISOString()};
+  const elecData=loadElec();
+  const payload={maquinas:db.maquinas,backups:db.backups,tareas:db.tareas,usuarios:db.usuarios,credenciales:db.credenciales,auditLog:db.auditLog||[],tableros:elecData.tableros||[],componentes:elecData.componentes||[],_syncedAt:new Date().toISOString()};
   let r;
   try{
     r=await fetch('https://graph.microsoft.com/v1.0/me/drive/root:/Apps/PharmaControl/data.json:/content',{method:'PUT',headers:{'Authorization':'Bearer '+odToken,'Content-Type':'application/json'},body:JSON.stringify(payload)});
@@ -721,6 +722,10 @@ async function odLoadFromCloud(){
     const data=await r.json();
     db={...defaultDB,...data};
     saveDB();
+    // Restaurar datos eléctricos
+    if(data.tableros||data.componentes){
+      saveElec({tableros:data.tableros||[],componentes:data.componentes||[]});
+    }
     localStorage.setItem(OD_LS_LAST,new Date().toISOString());
     try{odUpdateUI(true);}catch(e){}
     toast('✓ Datos cargados desde OneDrive');
@@ -750,6 +755,15 @@ function loadElec() {
 function saveElec(e) { localStorage.setItem(ELEC_KEY, JSON.stringify(e)); }
 
 // ── TABLEROS ──────────────────────────────────────────────────
+function diagElec() {
+  const elec = localStorage.getItem('pharmacontrol_elec');
+  const parsed = elec ? JSON.parse(elec) : null;
+  const msg = parsed
+    ? `Tableros: ${parsed.tableros?.length||0}\nComponentes: ${parsed.componentes?.length||0}\n\nDatos: ${elec.slice(0,200)}...`
+    : 'pharmacontrol_elec = null (sin datos)';
+  alert('DIAGNÓSTICO ELÉCTRICO:\n\n' + msg);
+}
+
 function elecRenderTableros() {
   const e = loadElec();
   const s = ($('elec-t-search')?.value||'').toLowerCase();
@@ -801,7 +815,9 @@ function elecRenderTableros() {
             <td><button class="btn btn-sm btn-danger" onclick="elecDeleteComp('${c.id}','${esc(c.nombre)}')"><i class="ti ti-trash"></i></button></td>
           </tr>`).join('')}</tbody>
         </table>` : '<p style="font-size:12px;color:var(--text3)">Sin componentes registrados en este tablero.</p>'}
-        <button class="btn btn-sm btn-secondary" style="margin-top:10px" onclick="elecOpenCompModal('${t.id}','${esc(t.nombre)}')">
+        <button class="btn btn-sm btn-secondary" style="margin-top:10px" 
+          data-tid="${t.id}" data-tnombre="${esc(t.nombre)}"
+          onclick="elecOpenCompModal(this.dataset.tid, this.dataset.tnombre)">
           <i class="ti ti-plus"></i>Agregar componente
         </button>
       </div>
