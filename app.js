@@ -662,7 +662,7 @@ function odDisconnect(){if(!confirm('¿Desconectar OneDrive?'))return;odToken=nu
 function odCheckCallback(){const s=localStorage.getItem(OD_LS_TOKEN);if(s){odToken=s;const j=localStorage.getItem(OD_LS_SYNCED);if(j){localStorage.removeItem(OD_LS_SYNCED);toast('OneDrive conectado ✓');setTimeout(()=>odLoadFromCloud(),800);}}}
 function odUpdateUI(connected){
   const dot=$('od-status-dot'),msg=$('od-status-msg'),sub=$('od-status-sub');
-  const btnCon=$('btn-od-connect'),btnDis=$('btn-od-disconnect'),btnSync=$('btn-od-sync'),btnLoad=$('btn-od-load'),lastEl=$('od-last-sync');
+  const btnCon=$('btn-od-connect'),btnDis=$('btn-od-disconnect'),lastEl=$('od-last-sync');
   if(!dot)return;
   if(connected){dot.style.background='var(--green)';dot.style.boxShadow='0 0 6px var(--green)';msg.textContent='Conectado a OneDrive';sub.textContent='Datos en OneDrive/Apps/PharmaControl/data.json';if(btnCon)btnCon.style.display='none';if(btnDis)btnDis.style.display='';if(btnSync)btnSync.style.display='';if(btnLoad)btnLoad.style.display='';const last=localStorage.getItem(OD_LS_LAST);if(last&&lastEl){lastEl.style.display='';lastEl.textContent='Última sincronización: '+new Date(last).toLocaleString('es-MX');}}
   else{dot.style.background='var(--text3)';dot.style.boxShadow='none';msg.textContent='No conectado';sub.textContent='Conecta tu cuenta Microsoft para sincronizar entre dispositivos';if(btnCon)btnCon.style.display='';if(btnDis)btnDis.style.display='none';if(btnSync)btnSync.style.display='none';if(btnLoad)btnLoad.style.display='none';if(lastEl)lastEl.style.display='none';}
