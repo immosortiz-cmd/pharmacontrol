@@ -673,21 +673,46 @@ async function odSyncToCloud(){
   if(!odToken){toast('Conecta OneDrive primero','error');return;}
   toast('Sincronizando...','info');
   const payload={maquinas:db.maquinas,backups:db.backups,tareas:db.tareas,usuarios:db.usuarios,credenciales:db.credenciales,auditLog:db.auditLog||[],_syncedAt:new Date().toISOString()};
-  try{const r=await fetch('https://graph.microsoft.com/v1.0/me/drive/root:/Apps/PharmaControl/data.json:/content',{method:'PUT',headers:{'Authorization':'Bearer '+odToken,'Content-Type':'application/json'},body:JSON.stringify(payload)});
-    if(r.ok){localStorage.setItem(OD_LS_LAST,new Date().toISOString());odUpdateUI(true);toast('✓ Datos guardados en OneDrive');}
-    else if(r.status===401){odToken=null;localStorage.removeItem(OD_LS_TOKEN);odUpdateUI(false);toast('Sesión expirada — vuelve a conectar','error');}
-    else toast('Error: '+r.status,'error');
-  }catch(e){toast('Error de red','error');}
+  let r;
+  try{
+    r=await fetch('https://graph.microsoft.com/v1.0/me/drive/root:/Apps/PharmaControl/data.json:/content',{method:'PUT',headers:{'Authorization':'Bearer '+odToken,'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  }catch(e){toast('Error de conexión — verifica tu internet','error');return;}
+  if(r.ok){
+    localStorage.setItem(OD_LS_LAST,new Date().toISOString());
+    try{odUpdateUI(true);}catch(e){}
+    toast('✓ Datos guardados en OneDrive');
+  } else if(r.status===401){
+    odToken=null;localStorage.removeItem(OD_LS_TOKEN);
+    try{odUpdateUI(false);}catch(e){}
+    toast('Sesión expirada — vuelve a conectar','error');
+  } else {
+    toast('Error al guardar: '+r.status,'error');
+  }
 }
 async function odLoadFromCloud(){
   if(!odToken){toast('Conecta OneDrive primero','error');return;}
   if(!confirm('¿Cargar desde OneDrive? Los datos locales se reemplazarán.'))return;
-  try{const r=await fetch('https://graph.microsoft.com/v1.0/me/drive/root:/Apps/PharmaControl/data.json:/content',{headers:{'Authorization':'Bearer '+odToken}});
-    if(r.ok){const data=await r.json();db={...defaultDB,...data};saveDB();localStorage.setItem(OD_LS_LAST,new Date().toISOString());odUpdateUI(true);toast('✓ Datos cargados desde OneDrive');loadDashboard();}
-    else if(r.status===404)toast('Sin datos en OneDrive todavía','info');
-    else if(r.status===401){odToken=null;localStorage.removeItem(OD_LS_TOKEN);odUpdateUI(false);toast('Sesión expirada','error');}
-    else toast('Error: '+r.status,'error');
-  }catch(e){toast('Error de red','error');}
+  let r;
+  try{
+    r=await fetch('https://graph.microsoft.com/v1.0/me/drive/root:/Apps/PharmaControl/data.json:/content',{headers:{'Authorization':'Bearer '+odToken}});
+  }catch(e){toast('Error de conexión — verifica tu internet','error');return;}
+  if(r.ok){
+    const data=await r.json();
+    db={...defaultDB,...data};
+    saveDB();
+    localStorage.setItem(OD_LS_LAST,new Date().toISOString());
+    try{odUpdateUI(true);}catch(e){}
+    toast('✓ Datos cargados desde OneDrive');
+    loadDashboard();
+  } else if(r.status===404){
+    toast('Sin datos en OneDrive todavía — sube primero desde este dispositivo','info');
+  } else if(r.status===401){
+    odToken=null;localStorage.removeItem(OD_LS_TOKEN);
+    try{odUpdateUI(false);}catch(e){}
+    toast('Sesión expirada — vuelve a conectar','error');
+  } else {
+    toast('Error al cargar: '+r.status,'error');
+  }
 }
 
 // ── APARIENCIA ────────────────────────────────────────────────
