@@ -666,84 +666,297 @@ $('btn-reload-config').addEventListener('click',loadNotificaciones);
 $('btn-prueba-email').addEventListener('click',()=>{toast('El envío de correos requiere servidor. Usa un servicio como EmailJS para apps sin servidor.','info');});
 $('btn-enviar-ahora').addEventListener('click',()=>{toast('El envío de correos requiere servidor. Considera usar EmailJS o configurar en la PC.','info');});
 
-// ── ONEDRIVE ─────────────────────────────────────────────────
-const OD_LS_TOKEN='pharma_od_token', OD_LS_CLIENT='pharma_od_clientid', OD_LS_SYNCED='pharma_od_just_connected', OD_LS_LAST='pharma_od_last_sync';
-let odToken=localStorage.getItem(OD_LS_TOKEN)||null;
+// ── ONEDRIVE — Optimistic Sync + Silent Refresh ──────────────
+const OD_LS_TOKEN   = 'pharma_od_token';
+const OD_LS_CLIENT  = 'pharma_od_clientid';
+const OD_LS_SYNCED  = 'pharma_od_just_connected';
+const OD_LS_LAST    = 'pharma_od_last_sync';
+const OD_LS_PENDING = 'pharma_od_pending';
+const OD_LS_EXPIRY  = 'pharma_od_expiry';
+const OD_DEBOUNCE_MS = 2 * 60 * 1000; // 2 minutos
 
-function odGetRedirectUri(){const p=window.location.pathname.endsWith('/')?window.location.pathname:window.location.pathname.substring(0,window.location.pathname.lastIndexOf('/')+1);return window.location.origin+p+'od-callback.html';}
-function odSaveClientId(v){localStorage.setItem(OD_LS_CLIENT,v.trim());}
-function odConnect(){
-  const clientId=$('od-client-id')?.value.trim()||localStorage.getItem(OD_LS_CLIENT);
-  if(!clientId){toast('Configura el Client ID primero','error');return;}
-  localStorage.setItem(OD_LS_CLIENT,clientId);
-  const redirect=odGetRedirectUri();
-  window.location.href=`https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=${encodeURIComponent(clientId)}&response_type=token&redirect_uri=${encodeURIComponent(redirect.trim())}&scope=Files.ReadWrite&response_mode=fragment&prompt=select_account`;
+let odToken      = localStorage.getItem(OD_LS_TOKEN) || null;
+let _odDebounce  = null;
+let _odSyncing   = false;
+
+// ── Redirect URI ──────────────────────────────────────────────
+function odGetRedirectUri(){
+  const p = window.location.pathname.endsWith('/')
+    ? window.location.pathname
+    : window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/')+1);
+  return window.location.origin + p + 'od-callback.html';
 }
-function odDisconnect(){if(!confirm('¿Desconectar OneDrive?'))return;odToken=null;localStorage.removeItem(OD_LS_TOKEN);odUpdateUI(false);toast('Desconectado','info');}
-function odCheckCallback(){const s=localStorage.getItem(OD_LS_TOKEN);if(s){odToken=s;const j=localStorage.getItem(OD_LS_SYNCED);if(j){localStorage.removeItem(OD_LS_SYNCED);toast('OneDrive conectado ✓');setTimeout(()=>odLoadFromCloud(),800);}}}
+
+// ── Silent token refresh (sin interrumpir al usuario) ─────────
+function odSilentRefresh(){
+  return new Promise(resolve => {
+    const clientId = localStorage.getItem(OD_LS_CLIENT);
+    if(!clientId){ resolve(false); return; }
+    const redirect = odGetRedirectUri();
+    const url = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize`
+      + `?client_id=${encodeURIComponent(clientId)}`
+      + `&response_type=token&redirect_uri=${encodeURIComponent(redirect)}`
+      + `&scope=Files.ReadWrite&response_mode=fragment&prompt=none`;
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:absolute;width:0;height:0;border:none;visibility:hidden';
+    document.body.appendChild(iframe);
+    const timer = setTimeout(() => {
+      document.body.removeChild(iframe);
+      resolve(false);
+    }, 8000);
+    iframe.onload = () => {
+      try {
+        const hash = iframe.contentWindow.location.hash;
+        if(hash && hash.includes('access_token')){
+          const params = new URLSearchParams(hash.slice(1));
+          const token  = params.get('access_token');
+          const expiresIn = parseInt(params.get('expires_in')||'3600');
+          if(token){
+            odToken = token;
+            localStorage.setItem(OD_LS_TOKEN, token);
+            localStorage.setItem(OD_LS_EXPIRY, Date.now() + expiresIn*1000);
+            clearTimeout(timer);
+            document.body.removeChild(iframe);
+            resolve(true);
+            return;
+          }
+        }
+      } catch(e) {}
+      clearTimeout(timer);
+      try{ document.body.removeChild(iframe); }catch(e){}
+      resolve(false);
+    };
+    iframe.src = url;
+  });
+}
+
+// ── Verificar y renovar token antes de operar ─────────────────
+async function odEnsureToken(){
+  if(!odToken) return false;
+  const expiry = parseInt(localStorage.getItem(OD_LS_EXPIRY)||'0');
+  // Si expira en menos de 5 minutos, intentar renovar
+  if(expiry && Date.now() > expiry - 5*60*1000){
+    const renewed = await odSilentRefresh();
+    if(!renewed){
+      // No se pudo renovar silenciosamente — pedir login
+      odToken = null;
+      localStorage.removeItem(OD_LS_TOKEN);
+      odUpdateUI(false);
+      toast('Sesión de OneDrive expirada — reconecta para continuar','error');
+      return false;
+    }
+  }
+  return true;
+}
+
+// ── OPTIMISTIC SYNC — sube automáticamente 2 min después de cambios ──
+function odScheduleSync(){
+  if(!odToken) return;
+  localStorage.setItem(OD_LS_PENDING, '1');
+  if(_odDebounce) clearTimeout(_odDebounce);
+  _odDebounce = setTimeout(async () => {
+    if(localStorage.getItem(OD_LS_PENDING)==='1'){
+      await odSyncToCloud(true); // true = silencioso (sin toast)
+    }
+  }, OD_DEBOUNCE_MS);
+  odSidebarUpdateUI();
+}
+
+// ── Subir datos a OneDrive ────────────────────────────────────
+async function odSyncToCloud(silent=false){
+  if(!odToken){ if(!silent) toast('Conecta OneDrive primero','error'); return; }
+  if(_odSyncing) return;
+  _odSyncing = true;
+  if(!silent) toast('Sincronizando...','info');
+  // Renovar token si es necesario
+  const ok = await odEnsureToken();
+  if(!ok){ _odSyncing=false; return; }
+  const elecData = loadElec();
+  const payload  = {
+    maquinas:db.maquinas, backups:db.backups, tareas:db.tareas,
+    usuarios:db.usuarios, credenciales:db.credenciales, auditLog:db.auditLog||[],
+    tableros:elecData.tableros||[], componentes:elecData.componentes||[],
+    _syncedAt:new Date().toISOString()
+  };
+  let r;
+  try{
+    r = await fetch('https://graph.microsoft.com/v1.0/me/drive/root:/Apps/PharmaControl/data.json:/content',
+      {method:'PUT', headers:{'Authorization':'Bearer '+odToken,'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+  } catch(e){ _odSyncing=false; if(!silent) toast('Error de conexión','error'); return; }
+
+  if(r.ok){
+    localStorage.setItem(OD_LS_LAST,''+Date.now());
+    localStorage.removeItem(OD_LS_PENDING);
+    if(!silent) toast('✓ Datos guardados en OneDrive');
+    try{ odUpdateUI(true); }catch(e){}
+  } else if(r.status===401){
+    // Token rechazado — intentar renovar
+    const renewed = await odSilentRefresh();
+    if(renewed){ _odSyncing=false; await odSyncToCloud(silent); return; }
+    odToken=null; localStorage.removeItem(OD_LS_TOKEN);
+    try{ odUpdateUI(false); }catch(e){}
+    toast('Sesión expirada — vuelve a conectar','error');
+  } else {
+    if(!silent) toast('Error al guardar: '+r.status,'error');
+  }
+  _odSyncing = false;
+}
+
+// ── Cargar datos desde OneDrive ───────────────────────────────
+async function odLoadFromCloud(silent=false){
+  if(!odToken){ if(!silent) toast('Conecta OneDrive primero','error'); return false; }
+  if(!silent && !confirm('¿Cargar desde OneDrive? Los datos locales se reemplazarán.')) return false;
+  const ok = await odEnsureToken();
+  if(!ok) return false;
+  let r;
+  try{
+    r = await fetch('https://graph.microsoft.com/v1.0/me/drive/root:/Apps/PharmaControl/data.json:/content',
+      {headers:{'Authorization':'Bearer '+odToken}});
+  } catch(e){ if(!silent) toast('Error de conexión','error'); return false; }
+
+  if(r.ok){
+    const data = await r.json();
+    db = {...defaultDB,...data};
+    localStorage.setItem(DB_KEY, JSON.stringify(db));
+    if(data.tableros||data.componentes)
+      saveElec({tableros:data.tableros||[], componentes:data.componentes||[]});
+    localStorage.setItem(OD_LS_LAST,''+Date.now());
+    localStorage.removeItem(OD_LS_PENDING);
+    try{ odUpdateUI(true); }catch(e){}
+    if(!silent) toast('✓ Datos cargados desde OneDrive');
+    loadDashboard();
+    if(currentView==='elec-tableros') elecRenderTableros();
+    if(currentView==='elec-componentes') elecRenderComps();
+    return true;
+  } else if(r.status===404){
+    if(!silent) toast('Sin datos en OneDrive todavía','info');
+  } else if(r.status===401){
+    const renewed = await odSilentRefresh();
+    if(renewed){ return await odLoadFromCloud(silent); }
+    odToken=null; localStorage.removeItem(OD_LS_TOKEN);
+    try{ odUpdateUI(false); }catch(e){}
+    toast('Sesión expirada — vuelve a conectar','error');
+  }
+  return false;
+}
+
+// ── Al abrir la app: verificar si hay versión más nueva ───────
+async function odCheckNewVersion(){
+  if(!odToken) return;
+  try{
+    const ok = await odEnsureToken();
+    if(!ok) return;
+    const r = await fetch('https://graph.microsoft.com/v1.0/me/drive/root:/Apps/PharmaControl/data.json',
+      {headers:{'Authorization':'Bearer '+odToken}});
+    if(!r.ok) return;
+    const meta = await r.json();
+    const remoteDate = new Date(meta.lastModifiedDateTime).getTime();
+    const localLast  = parseInt(localStorage.getItem(OD_LS_LAST)||'0');
+    if(remoteDate > localLast + 30000){ // más de 30s de diferencia
+      const diff = Math.round((remoteDate - localLast)/60000);
+      const load = confirm(
+        `Hay datos más recientes en OneDrive (hace ${diff} min).
+¿Cargar antes de continuar?`
+      );
+      if(load) await odLoadFromCloud(true);
+    }
+  } catch(e){}
+}
+
+// ── Subir al cerrar/minimizar ─────────────────────────────────
+window.addEventListener('visibilitychange', async () => {
+  if(document.visibilityState === 'hidden' && localStorage.getItem(OD_LS_PENDING)==='1'){
+    if(_odDebounce){ clearTimeout(_odDebounce); _odDebounce=null; }
+    await odSyncToCloud(true);
+  }
+});
+window.addEventListener('beforeunload', () => {
+  if(localStorage.getItem(OD_LS_PENDING)==='1'){
+    if(_odDebounce){ clearTimeout(_odDebounce); _odDebounce=null; }
+    // sendBeacon no funciona con OneDrive, pero marcamos para subir al reabrir
+    // odSyncToCloud se llama en visibilitychange antes del unload
+  }
+});
+
+// ── Al iniciar: subir pendiente anterior si existe ────────────
+async function odCheckPendingOnStart(){
+  if(!odToken) return;
+  if(localStorage.getItem(OD_LS_PENDING)==='1'){
+    await new Promise(r=>setTimeout(r,1500)); // esperar que cargue la app
+    await odSyncToCloud(true);
+  }
+}
+
+// ── Connect / Disconnect ──────────────────────────────────────
+function odSaveClientId(v){ localStorage.setItem(OD_LS_CLIENT, v.trim()); }
+function odConnect(){
+  const clientId = $('od-client-id')?.value.trim() || localStorage.getItem(OD_LS_CLIENT);
+  if(!clientId){ toast('Configura el Client ID primero','error'); return; }
+  localStorage.setItem(OD_LS_CLIENT, clientId);
+  const redirect = odGetRedirectUri();
+  window.location.href = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize`
+    + `?client_id=${encodeURIComponent(clientId)}&response_type=token`
+    + `&redirect_uri=${encodeURIComponent(redirect)}&scope=Files.ReadWrite`
+    + `&response_mode=fragment&prompt=select_account`;
+}
+function odDisconnect(){
+  if(!confirm('¿Desconectar OneDrive?')) return;
+  odToken = null;
+  localStorage.removeItem(OD_LS_TOKEN);
+  localStorage.removeItem(OD_LS_EXPIRY);
+  if(_odDebounce){ clearTimeout(_odDebounce); _odDebounce=null; }
+  odUpdateUI(false);
+  toast('Desconectado','info');
+}
+function odCheckCallback(){
+  const s = localStorage.getItem(OD_LS_TOKEN);
+  if(s){
+    odToken = s;
+    const j = localStorage.getItem(OD_LS_SYNCED);
+    if(j){
+      localStorage.removeItem(OD_LS_SYNCED);
+      toast('OneDrive conectado ✓');
+      setTimeout(async ()=>{
+        await odCheckNewVersion();
+      }, 800);
+    }
+  }
+}
 function odUpdateUI(connected){
   const dot=$('od-status-dot'),msg=$('od-status-msg'),sub=$('od-status-sub');
   const btnCon=$('btn-od-connect'),btnDis=$('btn-od-disconnect'),lastEl=$('od-last-sync');
-  // Actualizar también el sidebar
   setTimeout(odSidebarUpdateUI, 50);
-  if(!dot)return;
-  if(connected){dot.style.background='var(--green)';dot.style.boxShadow='0 0 6px var(--green)';msg.textContent='Conectado a OneDrive';sub.textContent='Datos en OneDrive/Apps/PharmaControl/data.json';if(btnCon)btnCon.style.display='none';if(btnDis)btnDis.style.display='';const last=localStorage.getItem(OD_LS_LAST);if(last&&lastEl){lastEl.style.display='';lastEl.textContent='Última sincronización: '+new Date(last).toLocaleString('es-MX');}}
-  else{dot.style.background='var(--text3)';dot.style.boxShadow='none';msg.textContent='No conectado';sub.textContent='Conecta tu cuenta Microsoft para sincronizar entre dispositivos';if(btnCon)btnCon.style.display='';if(btnDis)btnDis.style.display='none';if(lastEl)lastEl.style.display='none';}
-}
-function odInitPanel(){const ci=$('od-client-id');const ru=$('od-redirect-uri');if(ci)ci.value=localStorage.getItem(OD_LS_CLIENT)||'';if(ru)ru.value=odGetRedirectUri();odUpdateUI(!!odToken);}
-function odCopyRedirect(){const el=$('od-redirect-uri');if(!el)return;navigator.clipboard.writeText(el.value.trim()).then(()=>toast('URI copiada'));}
-async function odSyncToCloud(){
-  if(!odToken){toast('Conecta OneDrive primero','error');return;}
-  toast('Sincronizando...','info');
-  const elecData=loadElec();
-  const payload={maquinas:db.maquinas,backups:db.backups,tareas:db.tareas,usuarios:db.usuarios,credenciales:db.credenciales,auditLog:db.auditLog||[],tableros:elecData.tableros||[],componentes:elecData.componentes||[],_syncedAt:new Date().toISOString()};
-  let r;
-  try{
-    r=await fetch('https://graph.microsoft.com/v1.0/me/drive/root:/Apps/PharmaControl/data.json:/content',{method:'PUT',headers:{'Authorization':'Bearer '+odToken,'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  }catch(e){toast('Error de conexión — verifica tu internet','error');return;}
-  if(r.ok){
-    localStorage.setItem(OD_LS_LAST,new Date().toISOString());
-    try{odUpdateUI(true);}catch(e){}
-    toast('✓ Datos guardados en OneDrive');
-  } else if(r.status===401){
-    odToken=null;localStorage.removeItem(OD_LS_TOKEN);
-    try{odUpdateUI(false);}catch(e){}
-    toast('Sesión expirada — vuelve a conectar','error');
-  } else {
-    toast('Error al guardar: '+r.status,'error');
-  }
-}
-async function odLoadFromCloud(){
-  if(!odToken){toast('Conecta OneDrive primero','error');return;}
-  if(!confirm('¿Cargar desde OneDrive? Los datos locales se reemplazarán.'))return;
-  let r;
-  try{
-    r=await fetch('https://graph.microsoft.com/v1.0/me/drive/root:/Apps/PharmaControl/data.json:/content',{headers:{'Authorization':'Bearer '+odToken}});
-  }catch(e){toast('Error de conexión — verifica tu internet','error');return;}
-  if(r.ok){
-    const data=await r.json();
-    db={...defaultDB,...data};
-    saveDB();
-    // Restaurar datos eléctricos
-    if(data.tableros||data.componentes){
-      saveElec({tableros:data.tableros||[],componentes:data.componentes||[]});
+  if(!dot) return;
+  if(connected){
+    dot.style.background='var(--green)'; dot.style.boxShadow='0 0 6px var(--green)';
+    msg.textContent='Conectado a OneDrive';
+    sub.textContent='Sincronización automática activa';
+    if(btnCon) btnCon.style.display='none';
+    if(btnDis) btnDis.style.display='';
+    const last = parseInt(localStorage.getItem(OD_LS_LAST)||'0');
+    if(last && lastEl){
+      lastEl.style.display='';
+      lastEl.textContent='Última sincronización: '+new Date(last).toLocaleString('es-MX');
     }
-    localStorage.setItem(OD_LS_LAST,new Date().toISOString());
-    try{odUpdateUI(true);}catch(e){}
-    toast('✓ Datos cargados desde OneDrive');
-    loadDashboard();
-    // Refrescar módulo eléctrico si está activo
-    if(currentView==='elec-tableros') elecRenderTableros();
-    if(currentView==='elec-componentes') elecRenderComps();
-  } else if(r.status===404){
-    toast('Sin datos en OneDrive todavía — sube primero desde este dispositivo','info');
-  } else if(r.status===401){
-    odToken=null;localStorage.removeItem(OD_LS_TOKEN);
-    try{odUpdateUI(false);}catch(e){}
-    toast('Sesión expirada — vuelve a conectar','error');
   } else {
-    toast('Error al cargar: '+r.status,'error');
+    dot.style.background='var(--text3)'; dot.style.boxShadow='none';
+    msg.textContent='No conectado';
+    sub.textContent='Conecta tu cuenta Microsoft para activar la sincronización automática';
+    if(btnCon) btnCon.style.display='';
+    if(btnDis) btnDis.style.display='none';
+    if(lastEl)  lastEl.style.display='none';
   }
+}
+function odInitPanel(){
+  const ci=$('od-client-id'), ru=$('od-redirect-uri');
+  if(ci) ci.value = localStorage.getItem(OD_LS_CLIENT)||'';
+  if(ru) ru.value = odGetRedirectUri();
+  odUpdateUI(!!odToken);
+}
+function odCopyRedirect(){
+  const el=$('od-redirect-uri');
+  if(!el) return;
+  navigator.clipboard.writeText(el.value.trim()).then(()=>toast('URI copiada'));
 }
 
 
@@ -768,11 +981,11 @@ function odSidebarUpdateUI() {
     if(badge) badge.style.display='none';
     if(btnLoad) btnLoad.disabled = true;
     if(btnSave) btnSave.disabled = true;
-  } else if(_odPendingSync) {
+  } else if(_odPendingSync || localStorage.getItem(OD_LS_PENDING)==='1') {
     // Conectado con cambios pendientes
     icon.style.color = 'var(--amber)';
     if(dot) { dot.className='od-sync-dot pending'; }
-    if(status) status.textContent = 'Cambios pendientes';
+    if(status) status.textContent = 'Cambios pendientes...';
     if(badge) { badge.style.background='var(--amber)'; badge.style.display='block'; }
     if(btnLoad) btnLoad.disabled = false;
     if(btnSave) btnSave.disabled = false;
@@ -780,7 +993,7 @@ function odSidebarUpdateUI() {
     // Sincronizado
     icon.style.color = 'var(--green)';
     if(dot) { dot.className='od-sync-dot connected'; }
-    const last = localStorage.getItem(OD_LS_LAST);
+    const last = parseInt(localStorage.getItem(OD_LS_LAST)||'0');
     if(status) status.textContent = last
       ? 'Sincronizado ' + new Date(last).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})
       : 'Conectado';
@@ -790,10 +1003,10 @@ function odSidebarUpdateUI() {
   }
 }
 
-// Marcar como pendiente — se llama desde saveDB y saveElec originales
+// Marcar como pendiente y programar sync automático
 function odMarkPending() {
   _odPendingSync = true;
-  odSidebarUpdateUI();
+  odScheduleSync();
 }
 
 // Botones del sidebar
@@ -1142,3 +1355,8 @@ odCheckCallback();
 applyApariencia(loadAparienciaData());
 loadDashboard();
 odSidebarUpdateUI();
+// Verificar pendientes y versión nueva al iniciar
+setTimeout(async () => {
+  await odCheckPendingOnStart();
+  await odCheckNewVersion();
+}, 2000);
