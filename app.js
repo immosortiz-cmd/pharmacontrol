@@ -955,6 +955,94 @@ function odUpdateUI(connected){
   }
 }
 
+
+// ── DETECCIÓN DE CAMBIOS REMOTOS EN SEGUNDO PLANO ────────────
+let _odLastRemoteCheck = 0;
+let _odRemoteCheckInterval = null;
+let _odAskingAboutRemote = false;
+
+async function odCheckRemoteChanges() {
+  if(!odToken || _odAskingAboutRemote) return;
+  if(_odPendingSync) return; // si hay cambios locales pendientes, no verificar remoto
+  try {
+    const ok = await odEnsureToken();
+    if(!ok) return;
+    const r = await fetch(
+      'https://graph.microsoft.com/v1.0/me/drive/root:/Apps/PharmaControl/data.json',
+      { headers: { 'Authorization': 'Bearer ' + odToken } }
+    );
+    if(!r.ok) return;
+    const meta = await r.json();
+    const remoteDate = new Date(meta.lastModifiedDateTime).getTime();
+    const localLast  = parseInt(localStorage.getItem(OD_LS_LAST) || '0');
+    // Si hay cambios remotos más recientes de más de 15 segundos
+    if(remoteDate > localLast + 15000) {
+      _odAskingAboutRemote = true;
+      // Mostrar notificación no intrusiva en el sidebar
+      odShowRemoteBanner(remoteDate, localLast);
+    }
+  } catch(e) {}
+}
+
+function odShowRemoteBanner(remoteDate, localLast) {
+  if(document.getElementById('od-remote-overlay')) return;
+
+  const diff = Math.round((remoteDate - localLast) / 60000);
+  const timeLabel = diff < 1 ? 'hace unos segundos' : `hace ${diff} min`;
+
+  // Overlay bloqueante
+  const overlay = document.createElement('div');
+  overlay.id = 'od-remote-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:500;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px);animation:modal-bg-in .2s ease';
+
+  overlay.innerHTML = `
+    <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--radius-lg);padding:28px 32px;max-width:420px;width:90%;box-shadow:0 8px 40px rgba(0,0,0,.6);animation:modal-in .2s ease">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+        <div style="width:44px;height:44px;border-radius:50%;background:var(--accent-glow);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <i class="ti ti-cloud-download" style="font-size:22px;color:var(--accent)"></i>
+        </div>
+        <div>
+          <div style="font-size:16px;font-weight:600;color:var(--text)">Cambios detectados en OneDrive</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px">Sincronización automática</div>
+        </div>
+      </div>
+      <div style="background:var(--bg3);border-radius:var(--radius);padding:14px;margin-bottom:20px;font-size:13px;color:var(--text2);line-height:1.6">
+        <i class="ti ti-device-mobile" style="color:var(--accent);margin-right:6px"></i>
+        Otro dispositivo guardó cambios en OneDrive <strong>${timeLabel}</strong>.
+        <br><br>
+        ¿Deseas cargar los datos más recientes? Los datos locales actuales se reemplazarán.
+      </div>
+      <div style="display:flex;gap:10px">
+        <button onclick="odDismissRemoteBanner()" class="btn btn-secondary" style="flex:1;justify-content:center">
+          <i class="ti ti-x"></i>Ahora no
+        </button>
+        <button onclick="odLoadRemoteChanges()" class="btn btn-primary" style="flex:1;justify-content:center">
+          <i class="ti ti-cloud-download"></i>Sí, cargar
+        </button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+}
+
+async function odLoadRemoteChanges() {
+  odDismissRemoteBanner();
+  await odLoadFromCloud(true);
+}
+
+function odDismissRemoteBanner() {
+  const overlay = document.getElementById('od-remote-overlay');
+  if(overlay) overlay.remove();
+  _odAskingAboutRemote = false;
+  setTimeout(() => { _odAskingAboutRemote = false; }, 120000);
+}
+
+// Iniciar polling cada 30 segundos para detectar cambios remotos
+function odStartRemotePolling() {
+  if(_odRemoteCheckInterval) clearInterval(_odRemoteCheckInterval);
+  _odRemoteCheckInterval = setInterval(odCheckRemoteChanges, 30000);
+}
+
 // ── Guardar delay de sync desde el panel OneDrive ────────────
 function odSaveSyncDelay(val) {
   localStorage.setItem('pharma_sync_delay', String(val||'120000'));
@@ -1406,6 +1494,8 @@ setInterval(() => {
   odSidebarUpdateUI();
   odUpdateSyncStatus();
 }, 10000);
+// Iniciar detección de cambios remotos (cada 30s)
+odStartRemotePolling();
 // Verificar pendientes y versión nueva al iniciar
 setTimeout(async () => {
   await odCheckPendingOnStart();
