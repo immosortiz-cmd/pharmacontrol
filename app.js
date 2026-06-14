@@ -788,8 +788,10 @@ async function odSyncToCloud(silent=false){
   if(r.ok){
     localStorage.setItem(OD_LS_LAST,''+Date.now());
     localStorage.removeItem(OD_LS_PENDING);
+    _odPendingSync = false;
     if(!silent) toast('✓ Datos guardados en OneDrive');
     try{ odUpdateUI(true); }catch(e){}
+    odSidebarUpdateUI();
   } else if(r.status===401){
     // Token rechazado — intentar renovar
     const renewed = await odSilentRefresh();
@@ -1386,6 +1388,11 @@ odCheckCallback();
 applyApariencia(loadAparienciaData());
 loadDashboard();
 odSidebarUpdateUI();
+// Refrescar ícono sidebar cada 10 segundos
+setInterval(() => {
+  _odPendingSync = localStorage.getItem(OD_LS_PENDING) === '1';
+  odSidebarUpdateUI();
+}, 10000);
 // Verificar pendientes y versión nueva al iniciar
 setTimeout(async () => {
   await odCheckPendingOnStart();
