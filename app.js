@@ -673,7 +673,8 @@ const OD_LS_SYNCED  = 'pharma_od_just_connected';
 const OD_LS_LAST    = 'pharma_od_last_sync';
 const OD_LS_PENDING = 'pharma_od_pending';
 const OD_LS_EXPIRY  = 'pharma_od_expiry';
-const OD_DEBOUNCE_MS = 2 * 60 * 1000; // 2 minutos
+// Tiempo de sync configurable desde Apariencia
+function getOdDebounceMs(){ return parseInt(localStorage.getItem('pharma_sync_delay')||'120000'); }
 
 let odToken      = localStorage.getItem(OD_LS_TOKEN) || null;
 let _odDebounce  = null;
@@ -758,7 +759,7 @@ function odScheduleSync(){
     if(localStorage.getItem(OD_LS_PENDING)==='1'){
       await odSyncToCloud(true); // true = silencioso (sin toast)
     }
-  }, OD_DEBOUNCE_MS);
+  }, getOdDebounceMs());
   odSidebarUpdateUI();
 }
 
@@ -1282,6 +1283,26 @@ function applyApariencia(d){
 }
 
 function loadApariencia(){
+  // Cargar configuración de sync
+  const syncDelay = localStorage.getItem('pharma_sync_delay') || '120000';
+  const selDelay = document.getElementById('cfg-sync-delay');
+  if(selDelay) selDelay.value = syncDelay;
+  // Actualizar preview de estado
+  const preview = document.getElementById('cfg-sync-status-preview');
+  if(preview){
+    const ms = parseInt(syncDelay);
+    const label = ms===30000?'30 segundos':ms===60000?'1 minuto':ms===120000?'2 minutos':ms===300000?'5 minutos':'10 minutos';
+    const pending = localStorage.getItem('pharma_od_pending')==='1';
+    const last = parseInt(localStorage.getItem('pharma_od_last_sync')||'0');
+    const connected = !!localStorage.getItem('pharma_od_token');
+    preview.innerHTML = connected
+      ? `<div style="display:flex;flex-direction:column;gap:6px">
+          <span><i class="ti ti-clock" style="color:var(--accent)"></i> Sincroniza cada <strong>${label}</strong> tras un cambio</span>
+          <span style="color:${pending?'var(--amber)':'var(--green)'}"><i class="ti ti-${pending?'clock':'check'}"></i> ${pending?'Cambios pendientes de sincronizar':'Todo sincronizado'}</span>
+          ${last?`<span style="font-size:11px;color:var(--text3)">Última sync: ${new Date(last).toLocaleString('es-MX')}</span>`:''}
+        </div>`
+      : `<span style="color:var(--text3)"><i class="ti ti-cloud-off"></i> OneDrive no conectado</span>`;
+  }
   const d=loadAparienciaData();
   const fontSize=d.fontSize||14;
   const fontKey=d.fontKey||'ibm';
@@ -1340,6 +1361,16 @@ function handleLogoFile(file){
 function clearLogoImage(){const d=loadAparienciaData();delete d.logoUrl;saveAparienciaData(d);document.querySelectorAll('.brand-icon').forEach(el=>{const img=el.querySelector('img.brand-logo');if(img)img.style.display='none';const ic=el.querySelector('i');if(ic)ic.style.display='';el.style.background=d.accentHex||'var(--accent)';el.style.padding='';});const pi=document.getElementById('icon-preview-img');const pI=document.getElementById('icon-preview-i');const cr=document.getElementById('logo-clear-row');const np=document.getElementById('icon-name-preview');if(pi)pi.style.display='none';if(pI){pI.style.display='';pI.className=`ti ${d.iconClass||'ti-dna'}`;}if(cr)cr.style.display='none';if(np)np.textContent=d.iconClass||'ti-dna';toast('Imagen eliminada','info');}
 
 $('btn-guardar-apariencia').onclick=()=>{
+  // Guardar configuración de sync
+  const selDelay = document.getElementById('cfg-sync-delay');
+  if(selDelay){
+    const newDelay = parseInt(selDelay.value) || 120000;
+    localStorage.setItem('pharma_sync_delay', String(newDelay));
+    // Aplicar inmediatamente
+    if(typeof OD_DEBOUNCE_MS !== 'undefined'){
+      window._OD_DEBOUNCE_MS_OVERRIDE = newDelay;
+    }
+  }
   const iconEl=document.querySelector('.icon-opt.active');
   const colorEl=document.querySelector('.color-opt.active');
   const fontEl=document.querySelector('.font-opt.active');

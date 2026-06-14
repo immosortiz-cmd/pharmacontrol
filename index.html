@@ -454,6 +454,33 @@
           </div>
         </div>
       </div>
+
+      <!-- CONFIGURACIÓN DE SINCRONIZACIÓN -->
+      <div class="panel" style="margin-top:16px">
+        <div class="panel-header"><i class="ti ti-cloud-cog" style="margin-right:6px;color:var(--text3)"></i><span>Sincronización OneDrive</span></div>
+        <div style="padding:20px;display:flex;flex-direction:column;gap:16px">
+          <div class="form-row">
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Tiempo de espera antes de sincronizar</label>
+              <select class="form-select" id="cfg-sync-delay">
+                <option value="30000">30 segundos</option>
+                <option value="60000">1 minuto</option>
+                <option value="120000">2 minutos (recomendado)</option>
+                <option value="300000">5 minutos</option>
+                <option value="600000">10 minutos</option>
+              </select>
+              <div class="form-hint">Tiempo de inactividad tras un cambio antes de subir automáticamente</div>
+            </div>
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Estado de sincronización</label>
+              <div id="cfg-sync-status-preview" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;font-size:13px;color:var(--text2)">
+                Cargando...
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </section>
 
     <!-- ═══════════════════════════════════════════════════════════
