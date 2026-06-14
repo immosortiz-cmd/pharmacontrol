@@ -345,7 +345,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
    ═══════════════════════════════════════════════════════ */
 
 /* Botón hamburguesa — solo visible en móvil */
-.sidebar-toggle{display:none;position:fixed;top:12px;left:12px;z-index:150;width:42px;height:42px;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:20px;cursor:pointer;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+/* sidebar-toggle movido al interior del brand */
 
 /* Overlay oscuro detrás del sidebar */
 .sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99;backdrop-filter:blur(2px)}
@@ -369,10 +369,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
   /* Sidebar deslizable */
   .sidebar{position:fixed;left:-240px;top:0;bottom:0;width:240px;z-index:100;transition:left .25s ease;overflow-y:auto}
   .sidebar.open{left:0;box-shadow:4px 0 24px rgba(0,0,0,.5)}
-  .sidebar-toggle{display:flex}
+  /* sidebar-toggle ahora es sidebar-toggle-inner */
 
-  /* Contenido con espacio para el botón hamburguesa */
-  .main-content{padding:62px 14px 24px}
+  /* Contenido — sin padding extra porque el toggle ya está en el sidebar */
+  .main-content{padding:16px 14px 24px}
 
   /* Textos y headers */
   .page-title{font-size:18px}
@@ -506,3 +506,13 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 /* Icono rotando al sincronizar */
 @keyframes od-spin{to{transform:rotate(360deg)}}
 .od-spinning{animation:od-spin .8s linear infinite}
+
+/* Botón hamburguesa DENTRO del sidebar (móvil) */
+.sidebar-toggle-inner{display:none;width:36px;height:36px;border-radius:var(--radius);border:1px solid var(--border);background:transparent;color:var(--text);font-size:18px;cursor:pointer;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s}
+.sidebar-toggle-inner:hover{background:var(--bg3)}
+
+@media(max-width:768px){
+  .sidebar-toggle-inner{display:flex}
+  .sidebar-brand{display:flex;align-items:center;gap:10px}
+  .main-content{padding:16px 14px 24px}
+}
