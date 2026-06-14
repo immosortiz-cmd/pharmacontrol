@@ -735,19 +735,71 @@ function odSilentRefresh(){
 async function odEnsureToken(){
   if(!odToken) return false;
   const expiry = parseInt(localStorage.getItem(OD_LS_EXPIRY)||'0');
-  // Si expira en menos de 5 minutos, intentar renovar
-  if(expiry && Date.now() > expiry - 5*60*1000){
+  // Si no hay expiry guardado o expira en menos de 5 minutos → renovar
+  const needsRenewal = !expiry || Date.now() > expiry - 5*60*1000;
+  if(needsRenewal){
     const renewed = await odSilentRefresh();
     if(!renewed){
-      // No se pudo renovar silenciosamente — pedir login
+      // No se pudo renovar — mostrar modal de sesión expirada
       odToken = null;
       localStorage.removeItem(OD_LS_TOKEN);
-      odUpdateUI(false);
-      toast('Sesión de OneDrive expirada — reconecta para continuar','error');
+      localStorage.setItem(OD_LS_PENDING, '1'); // guardar que hay pendientes
+      odShowSessionExpiredModal();
       return false;
     }
   }
   return true;
+}
+
+// ── Modal de sesión expirada ──────────────────────────────────
+function odShowSessionExpiredModal(){
+  if(document.getElementById('od-session-overlay')) return;
+  odUpdateUI(false);
+  odSidebarUpdateUI();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'od-session-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:500;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px);animation:modal-bg-in .2s ease';
+  overlay.innerHTML = `
+    <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--radius-lg);padding:28px 32px;max-width:400px;width:90%;box-shadow:0 8px 40px rgba(0,0,0,.6);animation:modal-in .2s ease">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+        <div style="width:44px;height:44px;border-radius:50%;background:#fef3c7;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <i class="ti ti-lock" style="font-size:22px;color:#d97706"></i>
+        </div>
+        <div>
+          <div style="font-size:16px;font-weight:600;color:var(--text)">Sesión de OneDrive finalizada</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px">Se requiere reconexión</div>
+        </div>
+      </div>
+      <div style="background:var(--bg3);border-radius:var(--radius);padding:14px;margin-bottom:20px;font-size:13px;color:var(--text2);line-height:1.6">
+        <i class="ti ti-info-circle" style="color:var(--amber);margin-right:6px"></i>
+        Tu sesión con Microsoft ha expirado. 
+        <strong>Tus datos locales están seguros</strong> — ningún cambio se ha perdido.
+        <br><br>
+        Reconecta para continuar sincronizando automáticamente.
+      </div>
+      <div style="display:flex;gap:10px">
+        <button onclick="odDismissSessionModal()" class="btn btn-secondary" style="flex:1;justify-content:center">
+          <i class="ti ti-x"></i>Después
+        </button>
+        <button onclick="odReconnectFromModal()" class="btn btn-primary" style="flex:1;justify-content:center">
+          <i class="ti ti-refresh"></i>Reconectar ahora
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+function odDismissSessionModal(){
+  const el = document.getElementById('od-session-overlay');
+  if(el) el.remove();
+}
+
+function odReconnectFromModal(){
+  odDismissSessionModal();
+  // Guardar que hay pendientes antes de redirigir
+  localStorage.setItem(OD_LS_PENDING,'1');
+  odConnect();
 }
 
 // ── OPTIMISTIC SYNC — sube automáticamente 2 min después de cambios ──
@@ -794,12 +846,12 @@ async function odSyncToCloud(silent=false){
     odSidebarUpdateUI();
     odUpdateSyncStatus();
   } else if(r.status===401){
-    // Token rechazado — intentar renovar
     const renewed = await odSilentRefresh();
     if(renewed){ _odSyncing=false; await odSyncToCloud(silent); return; }
     odToken=null; localStorage.removeItem(OD_LS_TOKEN);
+    localStorage.setItem(OD_LS_PENDING,'1');
     try{ odUpdateUI(false); }catch(e){}
-    toast('Sesión expirada — vuelve a conectar','error');
+    odShowSessionExpiredModal();
   } else {
     if(!silent) toast('Error al guardar: '+r.status,'error');
   }
@@ -872,16 +924,54 @@ async function odCheckNewVersion(){
 
 // ── Subir al cerrar/minimizar ─────────────────────────────────
 window.addEventListener('visibilitychange', async () => {
-  if(document.visibilityState === 'hidden' && localStorage.getItem(OD_LS_PENDING)==='1'){
-    if(_odDebounce){ clearTimeout(_odDebounce); _odDebounce=null; }
-    await odSyncToCloud(true);
+  if(document.visibilityState === 'hidden'){
+    // Al minimizar/ocultar — subir pendientes
+    if(localStorage.getItem(OD_LS_PENDING)==='1'){
+      if(_odDebounce){ clearTimeout(_odDebounce); _odDebounce=null; }
+      await odSyncToCloud(true);
+    }
+  } else if(document.visibilityState === 'visible'){
+    // Al reabrir la app — verificar si la sesión sigue activa
+    if(odToken){
+      setTimeout(async () => {
+        const expiry = parseInt(localStorage.getItem(OD_LS_EXPIRY)||'0');
+        const tokenExpired = expiry && Date.now() > expiry;
+        if(tokenExpired){
+          // Token expirado — intentar renovar silenciosamente
+          const renewed = await odSilentRefresh();
+          if(!renewed){
+            // No se pudo renovar — mostrar modal
+            odToken = null;
+            localStorage.removeItem(OD_LS_TOKEN);
+            localStorage.setItem(OD_LS_PENDING,'1');
+            odShowSessionExpiredModal();
+            odSidebarUpdateUI();
+          }
+        }
+      }, 500); // pequeño delay para que la app termine de renderizar
+    }
   }
 });
 window.addEventListener('beforeunload', () => {
   if(localStorage.getItem(OD_LS_PENDING)==='1'){
     if(_odDebounce){ clearTimeout(_odDebounce); _odDebounce=null; }
-    // sendBeacon no funciona con OneDrive, pero marcamos para subir al reabrir
-    // odSyncToCloud se llama en visibilitychange antes del unload
+  }
+});
+
+// Al volver a la pestaña en PC (focus)
+window.addEventListener('focus', async () => {
+  if(!odToken) return;
+  const expiry = parseInt(localStorage.getItem(OD_LS_EXPIRY)||'0');
+  const tokenExpired = expiry && Date.now() > expiry;
+  if(tokenExpired){
+    const renewed = await odSilentRefresh();
+    if(!renewed){
+      odToken = null;
+      localStorage.removeItem(OD_LS_TOKEN);
+      localStorage.setItem(OD_LS_PENDING,'1');
+      odShowSessionExpiredModal();
+      odSidebarUpdateUI();
+    }
   }
 });
 
@@ -963,22 +1053,46 @@ let _odAskingAboutRemote = false;
 
 async function odCheckRemoteChanges() {
   if(!odToken || _odAskingAboutRemote) return;
-  if(_odPendingSync) return; // si hay cambios locales pendientes, no verificar remoto
+  if(_odPendingSync) return;
   try {
-    const ok = await odEnsureToken();
-    if(!ok) return;
+    // Verificar token antes — si expira durante el polling lo manejamos
+    const expiry = parseInt(localStorage.getItem(OD_LS_EXPIRY)||'0');
+    if(expiry && Date.now() > expiry - 2*60*1000){
+      // Token por expirar — renovar silenciosamente antes del check
+      await odSilentRefresh();
+      if(!odToken) return; // si no se pudo renovar, el modal ya se mostró
+    }
     const r = await fetch(
       'https://graph.microsoft.com/v1.0/me/drive/root:/Apps/PharmaControl/data.json',
-      { headers: { 'Authorization': 'Bearer ' + odToken } }
+      { headers: { 'Authorization': 'Bearer ' + (odToken||'') } }
     );
+    if(r.status === 401){
+      // Token rechazado — intentar renovar una vez más
+      const renewed = await odSilentRefresh();
+      if(!renewed){
+        odToken = null;
+        localStorage.removeItem(OD_LS_TOKEN);
+        odShowSessionExpiredModal();
+        return;
+      }
+      // Reintento con nuevo token
+      const r2 = await fetch(
+        'https://graph.microsoft.com/v1.0/me/drive/root:/Apps/PharmaControl/data.json',
+        { headers: { 'Authorization': 'Bearer ' + odToken } }
+      );
+      if(!r2.ok) return;
+      const meta2 = await r2.json();
+      const rd2 = new Date(meta2.lastModifiedDateTime).getTime();
+      const ll2 = parseInt(localStorage.getItem(OD_LS_LAST)||'0');
+      if(rd2 > ll2 + 15000){ _odAskingAboutRemote=true; odShowRemoteBanner(rd2,ll2); }
+      return;
+    }
     if(!r.ok) return;
     const meta = await r.json();
     const remoteDate = new Date(meta.lastModifiedDateTime).getTime();
-    const localLast  = parseInt(localStorage.getItem(OD_LS_LAST) || '0');
-    // Si hay cambios remotos más recientes de más de 15 segundos
-    if(remoteDate > localLast + 15000) {
+    const localLast  = parseInt(localStorage.getItem(OD_LS_LAST)||'0');
+    if(remoteDate > localLast + 15000){
       _odAskingAboutRemote = true;
-      // Mostrar notificación no intrusiva en el sidebar
       odShowRemoteBanner(remoteDate, localLast);
     }
   } catch(e) {}
