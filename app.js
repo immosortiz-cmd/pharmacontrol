@@ -792,6 +792,7 @@ async function odSyncToCloud(silent=false){
     if(!silent) toast('✓ Datos guardados en OneDrive');
     try{ odUpdateUI(true); }catch(e){}
     odSidebarUpdateUI();
+    odUpdateSyncStatus();
   } else if(r.status===401){
     // Token rechazado — intentar renovar
     const renewed = await odSilentRefresh();
@@ -825,7 +826,10 @@ async function odLoadFromCloud(silent=false){
       saveElec({tableros:data.tableros||[], componentes:data.componentes||[]});
     localStorage.setItem(OD_LS_LAST,''+Date.now());
     localStorage.removeItem(OD_LS_PENDING);
+    _odPendingSync = false;
     try{ odUpdateUI(true); }catch(e){}
+    odSidebarUpdateUI();
+    odUpdateSyncStatus();
     if(!silent) toast('✓ Datos cargados desde OneDrive');
     loadDashboard();
     if(currentView==='elec-tableros') elecRenderTableros();
@@ -950,11 +954,47 @@ function odUpdateUI(connected){
     if(lastEl)  lastEl.style.display='none';
   }
 }
+
+// ── Guardar delay de sync desde el panel OneDrive ────────────
+function odSaveSyncDelay(val) {
+  localStorage.setItem('pharma_sync_delay', String(val||'120000'));
+  odUpdateSyncStatus();
+  toast('Tiempo de sincronización actualizado');
+}
+
+// ── Actualizar panel de estado en OneDrive Sync ───────────────
+function odUpdateSyncStatus() {
+  const preview = document.getElementById('cfg-sync-status-preview');
+  if(!preview) return;
+  const ms = parseInt(localStorage.getItem('pharma_sync_delay')||'120000');
+  const label = ms===30000?'30 segundos':ms===60000?'1 minuto':ms===120000?'2 minutos':ms===300000?'5 minutos':'10 minutos';
+  const pending = localStorage.getItem(OD_LS_PENDING)==='1';
+  const last = parseInt(localStorage.getItem(OD_LS_LAST)||'0');
+  const connected = !!odToken;
+  if(!connected) {
+    preview.innerHTML = `<span style="color:var(--text3)"><i class="ti ti-cloud-off"></i> OneDrive no conectado — conecta para activar la sincronización automática</span>`;
+    return;
+  }
+  preview.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px">
+    <span><i class="ti ti-clock" style="color:var(--accent)"></i> Sincroniza automáticamente cada <strong>${label}</strong> tras un cambio</span>
+    <span style="color:${pending?'var(--amber)':'var(--green)'}">
+      <i class="ti ti-${pending?'clock':'check'}"></i> 
+      <strong>${pending?'Cambios pendientes de sincronizar':'Todo sincronizado'}</strong>
+    </span>
+    ${last?`<span style="font-size:11px;color:var(--text3)"><i class="ti ti-calendar"></i> Última sync: ${new Date(last).toLocaleString('es-MX')}</span>`:''}
+  </div>`;
+}
+
 function odInitPanel(){
   const ci=$('od-client-id'), ru=$('od-redirect-uri');
   if(ci) ci.value = localStorage.getItem(OD_LS_CLIENT)||'';
   if(ru) ru.value = odGetRedirectUri();
   odUpdateUI(!!odToken);
+  // Cargar selector de delay
+  const sel = document.getElementById('cfg-sync-delay');
+  if(sel) sel.value = localStorage.getItem('pharma_sync_delay')||'120000';
+  // Actualizar estado
+  odUpdateSyncStatus();
 }
 function odCopyRedirect(){
   const el=$('od-redirect-uri');
@@ -1285,26 +1325,7 @@ function applyApariencia(d){
 }
 
 function loadApariencia(){
-  // Cargar configuración de sync
-  const syncDelay = localStorage.getItem('pharma_sync_delay') || '120000';
-  const selDelay = document.getElementById('cfg-sync-delay');
-  if(selDelay) selDelay.value = syncDelay;
-  // Actualizar preview de estado
-  const preview = document.getElementById('cfg-sync-status-preview');
-  if(preview){
-    const ms = parseInt(syncDelay);
-    const label = ms===30000?'30 segundos':ms===60000?'1 minuto':ms===120000?'2 minutos':ms===300000?'5 minutos':'10 minutos';
-    const pending = localStorage.getItem('pharma_od_pending')==='1';
-    const last = parseInt(localStorage.getItem('pharma_od_last_sync')||'0');
-    const connected = !!localStorage.getItem('pharma_od_token');
-    preview.innerHTML = connected
-      ? `<div style="display:flex;flex-direction:column;gap:6px">
-          <span><i class="ti ti-clock" style="color:var(--accent)"></i> Sincroniza cada <strong>${label}</strong> tras un cambio</span>
-          <span style="color:${pending?'var(--amber)':'var(--green)'}"><i class="ti ti-${pending?'clock':'check'}"></i> ${pending?'Cambios pendientes de sincronizar':'Todo sincronizado'}</span>
-          ${last?`<span style="font-size:11px;color:var(--text3)">Última sync: ${new Date(last).toLocaleString('es-MX')}</span>`:''}
-        </div>`
-      : `<span style="color:var(--text3)"><i class="ti ti-cloud-off"></i> OneDrive no conectado</span>`;
-  }
+
   const d=loadAparienciaData();
   const fontSize=d.fontSize||14;
   const fontKey=d.fontKey||'ibm';
@@ -1363,16 +1384,7 @@ function handleLogoFile(file){
 function clearLogoImage(){const d=loadAparienciaData();delete d.logoUrl;saveAparienciaData(d);document.querySelectorAll('.brand-icon').forEach(el=>{const img=el.querySelector('img.brand-logo');if(img)img.style.display='none';const ic=el.querySelector('i');if(ic)ic.style.display='';el.style.background=d.accentHex||'var(--accent)';el.style.padding='';});const pi=document.getElementById('icon-preview-img');const pI=document.getElementById('icon-preview-i');const cr=document.getElementById('logo-clear-row');const np=document.getElementById('icon-name-preview');if(pi)pi.style.display='none';if(pI){pI.style.display='';pI.className=`ti ${d.iconClass||'ti-dna'}`;}if(cr)cr.style.display='none';if(np)np.textContent=d.iconClass||'ti-dna';toast('Imagen eliminada','info');}
 
 $('btn-guardar-apariencia').onclick=()=>{
-  // Guardar configuración de sync
-  const selDelay = document.getElementById('cfg-sync-delay');
-  if(selDelay){
-    const newDelay = parseInt(selDelay.value) || 120000;
-    localStorage.setItem('pharma_sync_delay', String(newDelay));
-    // Aplicar inmediatamente
-    if(typeof OD_DEBOUNCE_MS !== 'undefined'){
-      window._OD_DEBOUNCE_MS_OVERRIDE = newDelay;
-    }
-  }
+
   const iconEl=document.querySelector('.icon-opt.active');
   const colorEl=document.querySelector('.color-opt.active');
   const fontEl=document.querySelector('.font-opt.active');
@@ -1392,6 +1404,7 @@ odSidebarUpdateUI();
 setInterval(() => {
   _odPendingSync = localStorage.getItem(OD_LS_PENDING) === '1';
   odSidebarUpdateUI();
+  odUpdateSyncStatus();
 }, 10000);
 // Verificar pendientes y versión nueva al iniciar
 setTimeout(async () => {
