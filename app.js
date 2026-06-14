@@ -735,15 +735,23 @@ function odSilentRefresh(){
 async function odEnsureToken(){
   if(!odToken) return false;
   const expiry = parseInt(localStorage.getItem(OD_LS_EXPIRY)||'0');
-  // Si no hay expiry guardado o expira en menos de 5 minutos → renovar
-  const needsRenewal = !expiry || Date.now() > expiry - 5*60*1000;
-  if(needsRenewal){
+  // Si no hay expiry guardado → asumir válido (evitar loop)
+  if(!expiry) return true;
+  // Si expira en menos de 5 minutos → renovar
+  if(Date.now() > expiry - 5*60*1000){
     const renewed = await odSilentRefresh();
     if(!renewed){
-      // No se pudo renovar — mostrar modal de sesión expirada
+      // Verificar que el token realmente falló haciendo una llamada real
+      try {
+        const test = await fetch('https://graph.microsoft.com/v1.0/me/drive',
+          {headers:{'Authorization':'Bearer '+odToken}});
+        if(test.ok) return true; // token aún funciona a pesar del expiry
+      } catch(e) {}
+      // Token realmente inválido
       odToken = null;
       localStorage.removeItem(OD_LS_TOKEN);
-      localStorage.setItem(OD_LS_PENDING, '1'); // guardar que hay pendientes
+      localStorage.removeItem(OD_LS_EXPIRY);
+      localStorage.setItem(OD_LS_PENDING, '1');
       odShowSessionExpiredModal();
       return false;
     }
@@ -935,14 +943,20 @@ window.addEventListener('visibilitychange', async () => {
     if(odToken){
       setTimeout(async () => {
         const expiry = parseInt(localStorage.getItem(OD_LS_EXPIRY)||'0');
-        const tokenExpired = expiry && Date.now() > expiry;
+        // Solo verificar si hay expiry guardado y realmente expiró
+        const tokenExpired = expiry > 0 && Date.now() > expiry + 60000; // 1 min de gracia
         if(tokenExpired){
-          // Token expirado — intentar renovar silenciosamente
           const renewed = await odSilentRefresh();
           if(!renewed){
-            // No se pudo renovar — mostrar modal
+            // Confirmar con llamada real antes de mostrar modal
+            try {
+              const test = await fetch('https://graph.microsoft.com/v1.0/me/drive',
+                {headers:{'Authorization':'Bearer '+odToken}});
+              if(test.ok){ localStorage.removeItem(OD_LS_EXPIRY); return; }
+            } catch(e){}
             odToken = null;
             localStorage.removeItem(OD_LS_TOKEN);
+            localStorage.removeItem(OD_LS_EXPIRY);
             localStorage.setItem(OD_LS_PENDING,'1');
             odShowSessionExpiredModal();
             odSidebarUpdateUI();
@@ -962,12 +976,18 @@ window.addEventListener('beforeunload', () => {
 window.addEventListener('focus', async () => {
   if(!odToken) return;
   const expiry = parseInt(localStorage.getItem(OD_LS_EXPIRY)||'0');
-  const tokenExpired = expiry && Date.now() > expiry;
+  const tokenExpired = expiry > 0 && Date.now() > expiry + 60000;
   if(tokenExpired){
     const renewed = await odSilentRefresh();
     if(!renewed){
+      try {
+        const test = await fetch('https://graph.microsoft.com/v1.0/me/drive',
+          {headers:{'Authorization':'Bearer '+odToken}});
+        if(test.ok){ localStorage.removeItem(OD_LS_EXPIRY); return; }
+      } catch(e){}
       odToken = null;
       localStorage.removeItem(OD_LS_TOKEN);
+      localStorage.removeItem(OD_LS_EXPIRY);
       localStorage.setItem(OD_LS_PENDING,'1');
       odShowSessionExpiredModal();
       odSidebarUpdateUI();
